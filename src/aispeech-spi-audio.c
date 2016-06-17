@@ -112,6 +112,8 @@ const struct spi_audio_config gSpiAudioConfig = {
     .format = SPI_AUDIO_FORMAT_S16_LE,
 };
 
+const u8 gChannelsGainDbDefault[SPI_AUDIO_CHANNEL_NUM] = {80, 80, 80, 80, 80, 80, 80, 30};
+
 struct spiaud_ring_buffer {
     u8      *pBufBase;
     u8      *pRead;
@@ -1221,7 +1223,7 @@ static int spiaud_probe(struct spi_device *spi)
     spiaud->audioHeaderInfo.totalLength = sizeof(spiaud->audioHeaderInfo);
     spiaud->audioHeaderInfo.sequenceNumber = 0;
     spiaud->audioHeaderInfo.opCode = SPI_AUDIO_SLAVER_OP_NULL;
-    memset(spiaud->audioHeaderInfo.channelsGainDb, 0xff, SPI_AUDIO_CHANNEL_NUM);
+    memcpy(spiaud->audioHeaderInfo.channelsGainDb, gChannelsGainDbDefault, sizeof(gChannelsGainDbDefault));
 
     init_waitqueue_head(&gTransferEventWq);
     init_waitqueue_head(&gTransferEventRq);
