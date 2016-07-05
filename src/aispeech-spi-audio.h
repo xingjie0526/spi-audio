@@ -61,7 +61,8 @@ struct spi_audio_header_info {
 	u8 overrunFlag;
 	u8 testMode;
 	u8 sampleSize; /* 16bit or 24bit */
-	u8 dummy[4];
+	u8 dummy[2];
+	u16 oneshotParam;
 	u8 channelsGainDb[SPI_AUDIO_CHANNEL_NUM];
 };
 
@@ -175,5 +176,8 @@ struct spi_ioc_transfer {
 
 /* Set/Reset EM mode to the SPI slaver */
 #define SPI_IOC_WR_EM_MODE			_IOW(SPI_IOC_MAGIC, 7, __u8)
+
+/* Set oneshot param to the SPI slaver */
+#define SPI_IOC_WR_ONESHOT_PARAM	_IOW(SPI_IOC_MAGIC, 8, __u16)
 
 #endif /* __DRIVERS_SPI_AUDIO_HEADER_H */

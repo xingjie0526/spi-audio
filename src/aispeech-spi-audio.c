@@ -39,7 +39,9 @@
 #include <asm/uaccess.h>
 #include <asm/param.h>     /* HZ */
 #include <linux/proc_fs.h>
-
+#ifdef CONFIG_HAS_WAKELOCK
+#include <linux/wakelock.h>
+#endif
 #include "aispeech-spi-audio.h"
 
 enum {
@@ -154,8 +156,29 @@ static int gPeerSequenceNumber = -1;
 static int gPeerSequenceNumberBase = -1;
 static s64 gTimeUsArray[10];
 static unsigned gTimeIndex = 0;
+static u16 gOneshotParam = 0xFFFF;
 
 /*-------------------------------------------------------------------------*/
+static u32 hexAtoi(char s[])
+{
+    int i, len;
+    u32 n, temp = 0;
+
+    len=strlen(s);
+    for(i=0;i<len;i++) {
+        if(s[i]>='A' && s[i]<='F') {
+            n=s[i]-'A'+10;
+        } else if(s[i]>='a' &&s [i]<='f') {
+            n=s[i]-'a'+10;
+        } else if (s[i]>='0' &&s [i]<='9') {
+            n=s[i]-'0';
+        } else {
+            continue;
+        }
+        temp=temp*16+n;
+    }
+    return temp;
+}
 
 static u32 spiaud_format_to_bits(enum spi_audio_format format)
 {
@@ -174,6 +197,57 @@ static u32 spiaud_format_to_bits(enum spi_audio_format format)
 static u32 spiaud_frames_to_bytes(const struct spi_audio_config *pConfig, unsigned int frames)
 {
     return frames * pConfig->channels * (spiaud_format_to_bits(pConfig->format) >> 3);
+}
+
+#ifdef CONFIG_HAS_WAKELOCK
+static struct wake_lock gSpiWakeLock;
+#endif /* WAKELOCK */
+
+void spiaud_wakelock_init(void)
+{
+#ifdef CONFIG_HAS_WAKELOCK
+    print_wdbg("spiaud_wakelock_init(), spi_audio");
+    wake_lock_init(&gSpiWakeLock, WAKE_LOCK_SUSPEND, "spi_audio");
+#endif
+}
+
+void spiaud_wakelock_destroy(void)
+{
+#ifdef CONFIG_HAS_WAKELOCK
+    print_wdbg("spiaud_wakelock_destroy()");
+    wake_lock_destroy(&gSpiWakeLock);
+#endif
+}
+
+void spiaud_wake_lock(void)
+{
+#ifdef CONFIG_HAS_WAKELOCK
+    print_wdbg("spiaud_wake_lock()");
+    wake_lock(&gSpiWakeLock);
+#endif
+}
+
+void spiaud_wake_unlock(void)
+{
+#ifdef CONFIG_HAS_WAKELOCK
+    print_wdbg("spiaud_wake_unlock()");
+    wake_unlock(&gSpiWakeLock);
+#endif
+}
+
+static u16 spiaud_getOneshotParam() {
+    u16  param = gOneshotParam;
+
+    if (param != 0xFFFF) {
+        print_vdbg("gOneshotParam=0x%x\n", param);
+        gOneshotParam = 0xFFFF;
+    }
+
+    return param;
+}
+
+static void spiaud_setOneshotParam(u16 value) {
+    gOneshotParam = value;
 }
 
 static void spiaud_reset_ring_buffer(struct spiaud_ring_buffer *pRingBuf) {
@@ -526,6 +600,7 @@ static int spiaud_loopTranferFunc(void *pUsrdata)
         memset(spiaud->pTxBuffer, 0xcd, sizeof(spiaud->audioHeaderInfo) + 256);
         memcpy(spiaud->pTxBuffer, &spiaud->audioHeaderInfo, sizeof(spiaud->audioHeaderInfo));
         spiaud->audioHeaderInfo.sequenceNumber++;
+        spiaud->audioHeaderInfo.oneshotParam = spiaud_getOneshotParam();
         /* For Test { */
         //spiaud->audioHeaderInfo.totalLength = sizeof(spiaud->audioHeaderInfo) + 256;
         //memcpy(&spiaud->pTxBuffer[sizeof(spiaud->audioHeaderInfo)], "Hello World", sizeof("Hello World"));
@@ -551,7 +626,7 @@ static int spiaud_loopTranferFunc(void *pUsrdata)
         k2 = ktime_get();
         k2 = ktime_sub(k2, k1);
         timeUs = ktime_to_us(k2);
-        gTimeUsArray[gTimeIndex % sizeof(gTimeUsArray)] = timeUs;
+        gTimeUsArray[gTimeIndex % (sizeof(gTimeUsArray) / sizeof(s64))] = timeUs;
         gTimeIndex++;
         print_vdbg("spiaud_loopTranferFunc loop, cost:%lldus\n", timeUs);
         if (errCode) {
@@ -804,6 +879,13 @@ spiaud_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
             print_ddbg("Setting SPI slaver EM mode, value=%d\n", tmp);
         }
         break;
+    case SPI_IOC_WR_ONESHOT_PARAM:
+        retval = __get_user(tmp, (__u16 __user *)arg);
+        if (retval == 0) {
+            spiaud_setOneshotParam(tmp);
+            print_ddbg("Setting SPI slaver oneshot param, value=%d\n", tmp);
+        }
+        break;
     default:
         break;
     }
@@ -843,12 +925,14 @@ static int spiaud_open(struct inode *inode, struct file *filp)
         spiaud->users++;
         filp->private_data = spiaud;
         nonseekable_open(inode, filp);
+        spiaud_wake_lock();
     } else
         print_ddbg("spiaud: nothing for minor %d\n", iminor(inode));
 
     gPeerSequenceNumber = -1;
     spiaud_reset_ring_buffer(&spiaud->ringBuffer);
     spiaud_power_saving_request(spiaud, false);
+    spiaud_setOneshotParam(0xFFFF);
 
     atomic_set(&gTransferEventFlag, 1);
     wake_up(&gTransferEventWq);
@@ -886,6 +970,7 @@ static int spiaud_release(struct inode *inode, struct file *filp)
         mutex_lock(&spiaud->spiLock);
         dofree = (spiaud->spi == NULL);
         mutex_unlock(&spiaud->spiLock);
+        spiaud_wake_unlock();
 
         if (dofree)
             kfree(spiaud);
@@ -947,7 +1032,6 @@ static int spiaud_proc_version_init(struct proc_dir_entry* proc_root) {
 
     return 0;
 }
-
 
 static int spiaud_proc_gain_read(struct file *file, char __user *buffer,
                    size_t count, loff_t * offset) {
@@ -1096,27 +1180,20 @@ static int spiaud_proc_debug_read(struct file *file, char __user *buffer,
 static int spiaud_proc_debug_write(struct file *file, const char __user *buffer,
                     size_t count, loff_t * offset) {
     char tmpBuf[5];
-    int  i, len;
-    int  mask = 0;
+    int  len;
 
     len = count;
-    if (count > sizeof(tmpBuf)) {
-        len = sizeof(tmpBuf);
+    if (count >= sizeof(tmpBuf)) {
+        len = sizeof(tmpBuf) - 1;
     }
 
     if(copy_from_user(tmpBuf, buffer, len)) {
         printk("copy from user fail\n");
         return -EFAULT;
     }
+    tmpBuf[len] = 0;
 
-    for (i=0; i<len; i++) {
-        char ch = tmpBuf[i];
-        if(ch>='0' && ch<='9') {
-            mask = mask * 10 + (ch-'0');
-        }
-    }
-
-    gDebugMask = mask;
+    gDebugMask = hexAtoi(tmpBuf);
 
     return len;
 }
@@ -1132,6 +1209,47 @@ static int spiaud_proc_debug_init(struct proc_dir_entry* proc_root) {
     struct proc_dir_entry *p;
 
     p = proc_create_data("debug", 0664, proc_root, &spiaud_debug_entry_operations, NULL);
+    if(p == NULL) {
+        printk("create proc error!\n");
+        return -ENOMEM;;
+    }
+
+    return 0;
+}
+
+static int spiaud_proc_onshot_param_write(struct file *file, const char __user *buffer,
+                    size_t count, loff_t * offset) {
+    char tmpBuf[10];
+    int  len, value;
+
+    len = count;
+    if (count >= sizeof(tmpBuf)) {
+        len = sizeof(tmpBuf) - 1;
+    }
+
+    if(copy_from_user(tmpBuf, buffer, len)) {
+        printk("copy from user fail\n");
+        return -EFAULT;
+    }
+    tmpBuf[len] = 0;
+
+    value = hexAtoi(tmpBuf);
+    spiaud_setOneshotParam(value);
+    printk("spiaud_proc_onshot_param_write(), s=%s, value=0x%x\n", tmpBuf, value);
+
+    return len;
+}
+
+static const struct file_operations spiaud_onshot_param_entry_operations =
+{
+    .owner = THIS_MODULE,
+    .write = spiaud_proc_onshot_param_write,
+};
+
+static int spiaud_proc_onshot_param_init(struct proc_dir_entry* proc_root) {
+    struct proc_dir_entry *p;
+
+    p = proc_create_data("oneshot-param", 0220, proc_root, &spiaud_onshot_param_entry_operations, NULL);
     if(p == NULL) {
         printk("create proc error!\n");
         return -ENOMEM;;
@@ -1191,6 +1309,7 @@ static int spiaud_probe(struct spi_device *spi)
     mutex_init(&spiaud->ringBuffer.bufLock);
 
     INIT_LIST_HEAD(&spiaud->deviceEntry);
+    spiaud_wakelock_init();
 
     /* If we can allocate a minor number, hook up this device.
      * Reusing minors is fine so long as udev or mdev is working.
@@ -1245,6 +1364,7 @@ static int spiaud_probe(struct spi_device *spi)
         spiaud_proc_version_init(p);
         spiaud_proc_gain_init(p, spiaud);
         spiaud_proc_debug_init(p);
+        spiaud_proc_onshot_param_init(p);
     }
     else {
         kfree(spiaud);
@@ -1342,6 +1462,7 @@ static void __exit spiaud_exit(void)
     spi_unregister_driver(&spiaud_spi_driver);
     class_destroy(spiaud_class);
     unregister_chrdev(SPIDEV_MAJOR, spiaud_spi_driver.driver.name);
+    spiaud_wakelock_destroy();
 }
 module_exit(spiaud_exit);
 
