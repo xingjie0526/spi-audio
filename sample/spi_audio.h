@@ -65,6 +65,7 @@ struct spi_audio *spi_audio_open(struct spi_audio_config *pConfig);
 int spi_audio_is_ready(struct spi_audio *pAudio);
 int spi_audio_set_channel_gains(struct spi_audio *pAudio, struct spi_audio_channels_gain *pGain);
 int spi_audio_set_em_mode(struct spi_audio *pAudio, unsigned char bActive);
+int spi_audio_set_oneshot_param(struct spi_audio *pAudio, unsigned short value);
 
 /* IOCTL commands */
 #define SPI_IOC_MAGIC           'k'
@@ -77,6 +78,9 @@ int spi_audio_set_em_mode(struct spi_audio *pAudio, unsigned char bActive);
 
 /* Set/Reset EM mode to the SPI slaver */
 #define SPI_IOC_WR_EM_MODE          _IOW(SPI_IOC_MAGIC, 7, __u8)
+
+/* Set oneshot param to the SPI slaver */
+#define SPI_IOC_WR_ONESHOT_PARAM    _IOW(SPI_IOC_MAGIC, 8, __u16)
 
 #if defined(__cplusplus)
 }  /* extern "C" */

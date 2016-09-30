@@ -44,7 +44,7 @@ static int gFileIndex = 0;
 static struct spi_audio_config sDefaultSpiAudioConfig = {
     .channels = 8,
     .rate = 16000,
-    .periodSize = 320 /* (sample_rate * BUFF_DURATION_MS) / 1000 = 16000 * 20 / 1000 = 320 */
+    .periodSize = 320, /* (sample_rate * BUFF_DURATION_MS) / 1000 = 16000 * 20 / 1000 = 320 */
     .periodCount = 10,
     .format = SPI_AUDIO_FORMAT_S16_LE,
 };
@@ -97,7 +97,7 @@ int spi_audio_read(struct spi_audio *pAudio, unsigned char *pData, int count) {
         }
         
         if (ret < 0 ) {
-            ALOGE("spi_audio_read() cannot read stream data");
+            ALOGE("spi_audio_read() cannot read stream data, pAudio=0x%08x, fd=%d", pAudio, pAudio->fd);
             break;
         }
         readBytes = readBytes + ret;
@@ -125,9 +125,11 @@ int spi_audio_read(struct spi_audio *pAudio, unsigned char *pData, int count) {
 }
 
 int spi_audio_close(struct spi_audio *pAudio) {
-    ALOGD("spi_audio_close()");
+    ALOGD("spi_audio_close(), pAudio=0x%08x, fd=%d", pAudio, pAudio->fd);
     if (pAudio->fd >= 0) {
         close(pAudio->fd);
+    } else {
+        ALOGE("spi_audio_close() meets error, fd(%d) is invalid, pAudio=0x%08x", pAudio->fd, pAudio);
     }
 
     pAudio->fd = -1;
@@ -143,7 +145,7 @@ int spi_audio_close(struct spi_audio *pAudio) {
 
 int spi_audio_set_channels_gain(struct spi_audio *pAudio, struct spi_audio_channels_gain *pGain) {
     int retCode = 0;
-    ALOGD("spi_audio_set_channels_gain()");
+    ALOGD("spi_audio_set_channels_gain(), SPI_IOC_WR_CHANNELS_GAIN=%d", SPI_IOC_WR_CHANNELS_GAIN);
     if (pAudio->fd < 0) {
         ALOGE("Device '%s' has been close!", SPI_AUDIO_DEV_PATH);
     }
@@ -155,12 +157,23 @@ int spi_audio_set_channels_gain(struct spi_audio *pAudio, struct spi_audio_chann
 int spi_audio_set_em_mode(struct spi_audio *pAudio, unsigned char flag) {
     unsigned char  value = flag;
     int retCode = 0;
-    ALOGD("spi_audio_set_em_mode()");
+    ALOGD("spi_audio_set_em_mode(), SPI_IOC_WR_EM_MODE=%d", SPI_IOC_WR_EM_MODE);
     if (pAudio->fd < 0) {
         ALOGE("Device '%s' has been close!", SPI_AUDIO_DEV_PATH);
     }
     retCode = ioctl(pAudio->fd, SPI_IOC_WR_EM_MODE, &value);
     ALOGD("spi_audio_set_em_mode() %d Exit", retCode);
+    return retCode;
+}
+
+int spi_audio_set_oneshot_param(struct spi_audio *pAudio, unsigned short value) {
+    int retCode = 0;
+    ALOGD("spi_audio_set_oneshot_param(), value=%x, SPI_IOC_WR_ONESHOT_PARAM=%d", value, SPI_IOC_WR_ONESHOT_PARAM);
+    if (pAudio->fd < 0) {
+        ALOGE("Device '%s' has been close!", SPI_AUDIO_DEV_PATH);
+    }
+    retCode = ioctl(pAudio->fd, SPI_IOC_WR_ONESHOT_PARAM, &value);
+    ALOGD("spi_audio_set_oneshot_param() %d Exit", retCode);
     return retCode;
 }
 
@@ -181,7 +194,7 @@ struct spi_audio *spi_audio_open(struct spi_audio_config *pConfig) {
         return NULL;
     }
 
-    ALOGD("spi_audio_open() Exit");
+    ALOGD("spi_audio_open() Exit, pAudio=0x%08x, fd=%d", pAudio, pAudio->fd);
     return pAudio;
 }
 

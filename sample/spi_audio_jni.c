@@ -48,8 +48,6 @@ static jint spiaudio_native_setup(JNIEnv *env, jclass clazz,
         return (jint)-1;
     }
 
-    ALOGD("native_setup(%d, %d, %d, %d , %d)",
-            sampleRateInHertz, channelNum, audioFormat, periodSize, periodCount);
     g_pSpiAudio = spi_audio_open(&audioConfig);
     if (!g_pSpiAudio || !spi_audio_is_ready(g_pSpiAudio)) {
         ALOGE("Unable to open SPI Audio device!");
@@ -57,12 +55,14 @@ static jint spiaudio_native_setup(JNIEnv *env, jclass clazz,
         g_pSpiAudio = NULL;
         return (jint)-1;
     }
+    ALOGD("native_setup(%d, %d, %d, %d , %d) handler=0x%08x", 
+        sampleRateInHertz, channelNum, audioFormat, periodSize, periodCount, g_pSpiAudio);
 
     return 0;
 }
 
 static void spiaudio_native_release(JNIEnv *env, jclass clazz) {
-    ALOGD("native_release()");
+    ALOGD("native_release() handler=0x%08x", g_pSpiAudio);
     if (g_pSpiAudio) {
         spi_audio_close(g_pSpiAudio);
         g_pSpiAudio = NULL;
@@ -99,7 +99,7 @@ static jint spiaudio_native_read(JNIEnv *env, jclass clazz, jbyteArray javaAudio
     readSize = spi_audio_read(g_pSpiAudio, recordBuff + offsetInBytes, sizeInBytes);
     (*env)->ReleaseByteArrayElements(env, javaAudioData, recordBuff, 0);
     if (readSize < 0) {
-        ALOGE("Invalid operation");
+        ALOGE("Invalid operation, handler=0x%08x", g_pSpiAudio);
     }
 
     return (jint)readSize;
@@ -135,12 +135,27 @@ static jint spiaudio_native_set_channels_gain(JNIEnv *env, jclass clazz, jbyteAr
     return (jint)errCode;
 }
 
+static jint spiaudio_native_set_oneshot_param(JNIEnv *env, jclass clazz, jint u16param) {
+    int errCode;
+
+    ALOGD("spiaudio_native_set_oneshot_param()");
+    if (!g_pSpiAudio || !spi_audio_is_ready(g_pSpiAudio)) {
+        ALOGE("SPI Audio device is not ready!");
+        return -1;
+    }
+
+    errCode = spi_audio_set_oneshot_param(g_pSpiAudio, (unsigned short)u16param);
+
+    return (jint)errCode;
+}
+
 static JNINativeMethod methods[] = {
     // name, signature, function
     { "native_setup", "(IIIII)I", spiaudio_native_setup },
     { "native_release", "()V", spiaudio_native_release },
     { "native_read", "([BII)I", spiaudio_native_read },
     { "native_set_channels_gain", "([BI)I", spiaudio_native_set_channels_gain },
+    /* { "native_set_oneshot_param", "(I)I", spiaudio_native_set_oneshot_param }, */
 };
 
 int registerNatives(JNIEnv *env) {
